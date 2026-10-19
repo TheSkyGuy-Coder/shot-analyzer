@@ -1,0 +1,27 @@
+appId: de.shotanalyzer.app
+productName: Shot Analyzer
+copyright: MIT License
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+  # ffprobe-static bringt alle Plattformen mit. Für den Windows-Build nur x64 behalten.
+  - '!node_modules/ffprobe-static/bin/darwin/**'
+  - '!node_modules/ffprobe-static/bin/linux/**'
+  - '!node_modules/ffprobe-static/bin/win32/ia32/**'
+asarUnpack:
+  # FFmpeg und ffprobe sind ausführbare Dateien und dürfen nicht im asar-Archiv liegen.
+  - node_modules/ffmpeg-static/**
+  - node_modules/ffprobe-static/**
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  artifactName: Shot-Analyzer-Setup-${version}.${ext}
