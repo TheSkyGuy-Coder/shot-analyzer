@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { DrawBar } from './components/DrawBar'
+import { ToolBox, ViewerBar } from './components/DrawBar'
 import { Header } from './components/Header'
 import { BusyDialog, HelpDialog, Toast } from './components/Overlays'
 import { Timeline } from './components/Timeline'
@@ -7,6 +7,8 @@ import { Transport } from './components/Transport'
 import { Viewer } from './components/Viewer'
 import { loadProjectJson, openVideo, setBusyProgress, startAutosave } from './lib/actions'
 import { useHotkeys } from './lib/hotkeys'
+import { shotIndexAt } from './lib/shots'
+import { fmtFrameTime } from './lib/time'
 import { panelRegistry } from './lib/plugins'
 import { useProject } from './store/project'
 import { toast, useUi } from './store/ui'
@@ -35,13 +37,30 @@ function DropHint(): React.JSX.Element | null {
   if (has) return null
   return (
     <div id="drop">
-      <div style={{ fontSize: 42 }}>🎞️</div>
-      <div><b>Video hierher ziehen</b> oder oben „Video öffnen“ klicken.</div>
+      <div><b>Video hierher ziehen</b> oder Datei &gt; Video öffnen wählen.</div>
       <div className="muted" style={{ maxWidth: 440 }}>
         Alles läuft lokal auf deinem Rechner, es wird nichts hochgeladen. Auch Formate wie ProRes oder H.265 aus Premiere und After Effects sind möglich.
         Eine gespeicherte Analyse (.json) kann ebenfalls hineingezogen werden.
       </div>
     </div>
+  )
+}
+
+function StatusBar(): React.JSX.Element {
+  const project = useProject((s) => s.project)
+  const frame = useUi((s) => s.frame)
+  if (!project) return <footer id="statusbar"><span>Bereit</span></footer>
+  const v = project.video
+  const idx = shotIndexAt(project.shots, frame)
+  return (
+    <footer id="statusbar">
+      <span>{v.name}</span>
+      <span>{v.width}×{v.height}</span>
+      <span>{v.fps.toFixed(3).replace(/\.?0+$/, '')} fps</span>
+      <span>Shot {idx + 1} / {project.shots.length}</span>
+      <span>Frame {frame} / {v.frames}</span>
+      <span>{fmtFrameTime(frame, v.fps)}</span>
+    </footer>
   )
 }
 
@@ -89,16 +108,18 @@ export function App(): React.JSX.Element {
       <Header />
       <main>
         <section id="stage">
+          <ViewerBar />
           <div className="viewerArea">
+            <ToolBox />
             <Viewer />
             <DropHint />
           </div>
-          <DrawBar />
           <Transport />
           <Timeline />
         </section>
         <Sidebar />
       </main>
+      <StatusBar />
       <BusyDialog />
       <HelpDialog />
       <Toast />

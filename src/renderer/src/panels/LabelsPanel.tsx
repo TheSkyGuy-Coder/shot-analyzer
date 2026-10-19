@@ -6,6 +6,7 @@ import { itemText } from '@/lib/taxonomy'
 import { fmtFrameTime } from '@/lib/time'
 import { useProject } from '@/store/project'
 import { useUi } from '@/store/ui'
+import { Icon } from '@/components/Icon'
 
 export function LabelsPanel(): React.JSX.Element {
   const project = useProject((s) => s.project)
@@ -27,9 +28,9 @@ export function LabelsPanel(): React.JSX.Element {
         <span className="muted">{fmtFrameTime(shot.startFrame, fps)} – {fmtFrameTime(shot.endFrame, fps)} · {((shot.endFrame - shot.startFrame) / fps).toFixed(2)} s</span>
       </div>
       <div className="row" style={{ marginTop: 8 }}>
-        <button onClick={() => gotoShot(idx - 1)}>◀ Shot</button>
-        <button onClick={() => gotoShot(idx + 1)}>Shot ▶</button>
-        <button onClick={addCutAtPlayhead}>✂ Schnitt hier</button>
+        <button onClick={() => gotoShot(idx - 1)}>Shot zurück</button>
+        <button onClick={() => gotoShot(idx + 1)}>Shot weiter</button>
+        <button onClick={addCutAtPlayhead}><Icon name="cut" /> Schnitt hier</button>
         <button disabled={idx === 0} onClick={removeCutAtCurrentShot}>Schnitt davor entfernen</button>
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>

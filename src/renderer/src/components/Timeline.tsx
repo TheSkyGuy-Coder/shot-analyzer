@@ -88,7 +88,7 @@ export function Timeline(): React.JSX.Element {
       const st = useProject.getState()
       const p = st.project
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.fillStyle = '#101216'
+      ctx.fillStyle = '#232323'
       ctx.fillRect(0, 0, W, H)
       if (!p) return
       const fps = p.video.fps
@@ -97,17 +97,17 @@ export function Timeline(): React.JSX.Element {
       const v = view.current
       const spanSec = (v.f1 - v.f0) / fps
 
-      ctx.font = '11px system-ui, sans-serif'
+      ctx.font = '11px "Segoe UI", "Noto Sans", "DejaVu Sans", sans-serif'
       ctx.lineWidth = 1
       const step = STEPS_SEC.find((s) => (s / spanSec) * W >= 70) ?? 1800
       for (let t = Math.ceil(v.f0 / fps / step) * step; t * fps <= v.f1; t += step) {
         const x = Math.round(f2x(t * fps)) + 0.5
-        ctx.strokeStyle = '#3a404c'
+        ctx.strokeStyle = '#484848'
         ctx.beginPath()
         ctx.moveTo(x, 12)
         ctx.lineTo(x, R.s0 - 2)
         ctx.stroke()
-        ctx.fillStyle = '#8b93a1'
+        ctx.fillStyle = '#a0a0a0'
         ctx.fillText(fmtFrameTime(t * fps, fps, step < 1), x + 3, 10)
       }
 
@@ -119,7 +119,7 @@ export function Timeline(): React.JSX.Element {
         const sizeId = s.labels[p.taxonomy[0]?.id] as string | undefined
         const item = sizeId ? itemOf(p.taxonomy, p.taxonomy[0].id, sizeId) : undefined
         const col = item?.color
-        ctx.fillStyle = col ? col + '55' : '#2a2f38'
+        ctx.fillStyle = col ? col + '55' : '#3a3a3a'
         ctx.fillRect(x0 + 0.5, R.s0, Math.max(0, w - 1), R.s1 - R.s0)
         if (col) {
           ctx.fillStyle = col
@@ -173,7 +173,7 @@ export function Timeline(): React.JSX.Element {
         const x = Math.round(f2x(p.shots[i].startFrame)) + 0.5
         if (x < -5 || x > W + 5) continue
         const active = drag.current?.type === 'cut' && drag.current.shotId === p.shots[i].id
-        ctx.strokeStyle = active ? '#4f9dff' : '#fff'
+        ctx.strokeStyle = active ? '#3a8ad0' : '#fff'
         ctx.lineWidth = active ? 2 : 1
         ctx.globalAlpha = 0.9
         ctx.beginPath()
@@ -182,7 +182,7 @@ export function Timeline(): React.JSX.Element {
         ctx.stroke()
         ctx.globalAlpha = 1
         ctx.lineWidth = 1
-        ctx.fillStyle = active ? '#4f9dff' : '#fff'
+        ctx.fillStyle = active ? '#3a8ad0' : '#fff'
         ctx.beginPath()
         ctx.moveTo(x - 4, R.s0)
         ctx.lineTo(x + 4, R.s0)
@@ -205,14 +205,14 @@ export function Timeline(): React.JSX.Element {
       }
 
       const px = f2x(frame + 0.5)
-      ctx.strokeStyle = '#ff5a4f'
+      ctx.strokeStyle = '#e0483c'
       ctx.lineWidth = 2
       ctx.beginPath()
       ctx.moveTo(px, 0)
       ctx.lineTo(px, H)
       ctx.stroke()
       ctx.lineWidth = 1
-      ctx.fillStyle = '#ff5a4f'
+      ctx.fillStyle = '#e0483c'
       ctx.beginPath()
       ctx.moveTo(px - 5, 0)
       ctx.lineTo(px + 5, 0)

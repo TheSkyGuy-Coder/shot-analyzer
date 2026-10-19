@@ -27,7 +27,7 @@ export function StatsPanel(): React.JSX.Element {
     project.shots.forEach((s, i) => {
       const hh = Math.sqrt(L[i] / max) * (r.height - 8)
       const id = sizeAx ? (s.labels[sizeAx.id] as string | undefined) : undefined
-      ctx.fillStyle = (id && sizeAx && itemOf(project.taxonomy, sizeAx.id, id)?.color) || '#5a6272'
+      ctx.fillStyle = (id && sizeAx && itemOf(project.taxonomy, sizeAx.id, id)?.color) || '#5a5a5a'
       ctx.fillRect(i * bw + 0.5, r.height - hh, Math.max(1, bw - 1), hh)
       if (i === idx) {
         ctx.strokeStyle = '#fff'
@@ -55,7 +55,7 @@ export function StatsPanel(): React.JSX.Element {
         <span>Kürzester / längster</span><span>{sorted[0].toFixed(2)} / {sorted[sorted.length - 1].toFixed(2)} s</span>
       </div>
       <div className="axis">Shot-Längen im Verlauf</div>
-      <canvas ref={cv} style={{ width: '100%', height: 90, background: '#101216', borderRadius: 6, cursor: 'pointer' }} />
+      <canvas ref={cv} style={{ width: '100%', height: 90, background: '#232323', border: '1px solid #171717', borderRadius: 2, cursor: 'pointer' }} />
       <div className="muted" style={{ fontSize: 11 }}>Klick auf einen Balken springt zum Shot.</div>
       {project.taxonomy.map((ax) => {
         const rows = ax.items
