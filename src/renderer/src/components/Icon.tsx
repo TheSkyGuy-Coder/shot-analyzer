@@ -30,6 +30,14 @@ const PATHS = {
   third: <path d="M2.5 2.5h11v11h-11zM6.2 2.5v11M9.8 2.5v11M2.5 6.2h11M2.5 9.8h11" />,
   phi: <path d="M2.5 2.5h11v11h-11zM7 2.5v11M2.5 9h11" />,
   center: <path d="M2.5 2.5h11v11h-11zM8 2.5v11M2.5 8h11" />,
+  chevronRight: <path d="M6 3.5 10.5 8 6 12.5" />,
+  chevronDown: <path d="M3.5 6 8 10.5 12.5 6" />,
+  grip: <path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" strokeWidth={2.2} />,
+  plus: <path d="M8 3v10M3 8h10" />,
+  folder: <path d="M1.5 12.5V3.5h4l1.5 1.5h7v7.5z" />,
+  sortTime: <path d="M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM8 4.5V8l2.5 1.5" />,
+  collapseAll: <path d="M3.5 3.5 8 7l4.5-3.5M3.5 12.5 8 9l4.5 3.5" />,
+  expandAll: <path d="M3.5 7 8 3.5 12.5 7M3.5 9 8 12.5 12.5 9" />,
   diag: <path d="M2.5 2.5h11v11h-11zM2.5 2.5l11 11M13.5 2.5l-11 11" />
 } as const
 

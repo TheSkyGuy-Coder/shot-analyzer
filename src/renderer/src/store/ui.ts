@@ -11,6 +11,8 @@ export interface Busy {
   onCancel?: () => void
 }
 
+export type Mode = 'analyze' | 'scenes'
+
 export interface Guides {
   third: boolean
   phi: boolean
@@ -32,6 +34,14 @@ interface UiState {
   guides: Guides
   showDraw: boolean
   tab: string
+  /** Arbeitsmodus: Schnitt & Labels oder Szenen-Outliner. */
+  mode: Mode
+  /** Im Outliner markierte Shots (IDs) und zuletzt angeklickter Shot (für Shift-Auswahl). */
+  sel: string[]
+  selAnchor: string | null
+  /** Eingeklappte Szenen und gewählte Gruppierung pro Szene (Schlüssel: Szenen-ID, "_none" = nicht zugeordnet). */
+  collapsed: Record<string, boolean>
+  groupBy: Record<string, string>
   /** Empfindlichkeit 1..10 für Schnittkandidaten. */
   sens: number
   busy: Busy | null
@@ -61,6 +71,11 @@ export const useUi = create<UiState>(() => ({
   guides: { third: false, phi: false, center: false, diag: false },
   showDraw: true,
   tab: 'labels',
+  mode: 'analyze',
+  sel: [],
+  selAnchor: null,
+  collapsed: {},
+  groupBy: {},
   sens: 6,
   busy: null,
   helpOpen: false,

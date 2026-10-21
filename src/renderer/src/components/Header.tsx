@@ -80,6 +80,7 @@ export function Header(): React.JSX.Element {
   const canUndo = useProject((s) => s.past.length > 0)
   const canRedo = useProject((s) => s.future.length > 0)
   const sens = useUi((s) => s.sens)
+  const mode = useUi((s) => s.mode)
   const thr = thresholdForSensitivity(sens)
   const undo = useProject((s) => s.undo)
   const redo = useProject((s) => s.redo)
@@ -115,6 +116,13 @@ export function Header(): React.JSX.Element {
       ]
     },
     {
+      title: 'Ansicht',
+      items: [
+        { label: 'Modus: Analyse (Schnitte und Labels)', run: () => useUi.setState({ mode: 'analyze' }) },
+        { label: 'Modus: Szenen-Outliner', run: () => useUi.setState({ mode: 'scenes' }) }
+      ]
+    },
+    {
       title: 'Hilfe',
       items: [{ label: 'Kurzanleitung und Tastenkürzel', keys: 'F1', run: () => useUi.setState({ helpOpen: true }) }]
     }
@@ -142,6 +150,10 @@ export function Header(): React.JSX.Element {
         <div className="tsep" />
         <button disabled={!has} onClick={clearAllCuts} title="Alle Schnitte entfernen">Schnitte löschen</button>
         <div className="spacer" />
+        <div className="seg" title="Arbeitsmodus">
+          <button className={mode === 'analyze' ? 'on' : ''} onClick={() => useUi.setState({ mode: 'analyze' })}>Analyse</button>
+          <button className={mode === 'scenes' ? 'on' : ''} disabled={!has} onClick={() => useUi.setState({ mode: 'scenes' })}>Szenen</button>
+        </div>
         <button className="tb" onClick={() => useUi.setState({ helpOpen: true })} title="Hilfe und Tastenkürzel (F1)"><Icon name="help" /></button>
       </div>
     </header>

@@ -61,6 +61,10 @@ export function splitAt(p: Project, frame: number): boolean {
   if (frame - s.startFrame < MIN_FRAMES || s.endFrame - frame < MIN_FRAMES) return false
   const n = newShot(frame, s.endFrame, s.labels)
   n.sceneId = s.sceneId
+  if (s.setup) n.setup = s.setup
+  const scene = s.sceneId ? p.scenes.find((x) => x.id === s.sceneId) : undefined
+  const at = scene?.order ? scene.order.indexOf(s.id) : -1
+  if (scene?.order && at >= 0) scene.order.splice(at + 1, 0, n.id) // neuer Shot landet direkt hinter seinem Ursprung
   s.endFrame = frame
   s.palette = null
   p.shots.splice(i + 1, 0, n)

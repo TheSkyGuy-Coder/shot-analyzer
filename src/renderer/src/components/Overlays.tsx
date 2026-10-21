@@ -57,7 +57,8 @@ export function HelpDialog(): React.JSX.Element | null {
         <p className="muted">
           1) Video öffnen (beim ersten Mal wird ein Vorschau-Video erzeugt, das dauert kurz). 2) „Auto-Schnitte“ ausführen und die Timeline prüfen.
           3) Fehlende Schnitte per Doppelklick oder mit C setzen, falsche mit Entf entfernen. 4) Shot für Shot labeln. 5) Komposition mit dem Zeichenwerkzeug markieren.
-          6) Reiter „Farbe“ und „Statistik“ ansehen. Alles wird automatisch gespeichert; mit „Analyse speichern“ erhältst du eine Datei zur Abgabe.
+          6) Reiter „Farbe“ und „Statistik“ ansehen. 7) Im Modus „Szenen“ Shots in Szenen (Ordner) legen und per Drag and Drop sortieren; mit der Gruppierung
+          nach Kameraposition, Größe oder Funktion lässt sich die Abdeckung einer Szene prüfen. Alles wird automatisch gespeichert; mit „Analyse speichern“ erhältst du eine Datei zur Abgabe.
         </p>
         <table>
           <tbody>

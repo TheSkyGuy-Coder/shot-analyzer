@@ -14,6 +14,7 @@
  *   G                    Drittel-Raster ein/aus
  *   Esc                  Werkzeug abwählen / Dialog schließen
  *   F1  oder  ?          Hilfe
+ * Im Szenen-Modus gelten nur Leertaste, Pfeile und M (Schnitt- und Label-Kürzel sind gesperrt).
  */
 import { useEffect } from 'react'
 import {
@@ -70,6 +71,8 @@ export function useHotkeys(): void {
         return
       }
       if (!hasProject) return
+      // Im Szenen-Modus nur Wiedergabe und Navigation, damit nichts aus Versehen geschnitten oder gelabelt wird.
+      if (ui.mode === 'scenes' && ![' ', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'm'].includes(key)) return
 
       if (e.altKey) {
         if (key === 'arrowleft') nudgeNearestCut(e.shiftKey ? -5 : -1)

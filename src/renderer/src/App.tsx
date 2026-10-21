@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ToolBox, ViewerBar } from './components/DrawBar'
 import { Header } from './components/Header'
+import { Outliner } from './components/Outliner'
 import { BusyDialog, HelpDialog, Toast } from './components/Overlays'
 import { Timeline } from './components/Timeline'
 import { Transport } from './components/Transport'
@@ -18,6 +19,8 @@ const VIDEO_RE = /\.(mp4|mov|m4v|mkv|webm|avi|mxf|mpg|mpeg|mts|m2ts|wmv|flv|ogv)
 
 function Sidebar(): React.JSX.Element {
   const tab = useUi((s) => s.tab)
+  const mode = useUi((s) => s.mode)
+  if (mode === 'scenes') return <aside><Outliner /></aside>
   const active = panelRegistry.find((p) => p.id === tab) ?? panelRegistry[0]
   const Panel = active.component
   return (
@@ -66,6 +69,7 @@ function StatusBar(): React.JSX.Element {
 
 export function App(): React.JSX.Element {
   const [over, setOver] = useState(false)
+  const mode = useUi((s) => s.mode)
   useHotkeys()
 
   useEffect(() => {
@@ -80,7 +84,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const prevent = (e: DragEvent): void => {
       e.preventDefault()
-      setOver(e.type === 'dragenter' || e.type === 'dragover')
+      // Nur Datei-Drags (Video, Analyse) zeigen die Ablage-Markierung, nicht das Umsortieren im Outliner.
+      setOver((e.type === 'dragenter' || e.type === 'dragover') && !!e.dataTransfer?.types.includes('Files'))
     }
     const drop = async (e: DragEvent): Promise<void> => {
       e.preventDefault()
@@ -106,7 +111,7 @@ export function App(): React.JSX.Element {
   return (
     <div className={`app${over ? ' dragover' : ''}`}>
       <Header />
-      <main>
+      <main className={mode === 'scenes' ? 'scenes' : ''}>
         <section id="stage">
           <ViewerBar />
           <div className="viewerArea">

@@ -321,11 +321,13 @@ export async function exportCsv(): Promise<void> {
     const arr = Array.isArray(v) ? v : [v]
     return arr.map((id) => { const it = ax.items.find((i) => i.id === id); return it ? itemText(it) : id }).join(' | ')
   }
-  const head = ['Nr', 'Start', 'Ende', 'Startframe', 'Endframe', 'Dauer (s)', ...p.taxonomy.map((a) => a.title), 'Notiz', 'Farben']
+  const head = ['Nr', 'Start', 'Ende', 'Startframe', 'Endframe', 'Dauer (s)', ...p.taxonomy.map((a) => a.title), 'Szene', 'Location', 'Kameraposition', 'Notiz', 'Farben']
   const rows = p.shots.map((s, i) => [
     i + 1, fmtFrameTime(s.startFrame, fps), fmtFrameTime(s.endFrame, fps), s.startFrame, s.endFrame,
     ((s.endFrame - s.startFrame) / fps).toFixed(2).replace('.', ','),
-    ...p.taxonomy.map((a) => text(s, a.id)), s.note.replace(/\s+/g, ' '), (s.palette?.colors ?? []).map((c) => c.hex).join(' ')
+    ...p.taxonomy.map((a) => text(s, a.id)),
+    p.scenes.find((x) => x.id === s.sceneId)?.name ?? '', p.scenes.find((x) => x.id === s.sceneId)?.location ?? '', s.setup ?? '',
+    s.note.replace(/\s+/g, ' '), (s.palette?.colors ?? []).map((c) => c.hex).join(' ')
   ])
   const csv = '﻿' + [head, ...rows].map((r) => r.map(q).join(';')).join('\r\n')
   const path = await api().saveText(`${baseName(p)}.csv`, csv, 'csv')

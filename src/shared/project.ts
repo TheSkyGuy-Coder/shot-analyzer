@@ -5,7 +5,9 @@
  * Rundungsproblem beim Verschieben von Schnitten, und Frame-Snapping ist automatisch erfüllt.
  * Ein Shot belegt die Frames [startFrame, endFrame) – endFrame ist exklusiv.
  *
- * Szenen/Locations sind bereits im Modell vorgesehen (sceneId, scenes), die Oberfläche folgt später.
+ * Szenen/Locations: `scenes` ist die Ordnerliste des Szenen-Outliners, `shot.sceneId` ordnet einen Shot zu.
+ * Die Reihenfolge der Shots innerhalb einer Szene steht in `scene.order` (unabhängig von der Zeit im Video),
+ * `shot.setup` ist die frei benennbare Kameraposition.
  * Plugins speichern eigene Daten unter shot.ext[pluginId] bzw. project.ext[pluginId].
  */
 
@@ -62,6 +64,8 @@ export interface Shot {
   draw: Shape[]
   palette: Palette | null
   sceneId: string | null
+  /** Kameraposition / Setup, z. B. "A" oder "Kamera 2 links". Leer = nicht angegeben. */
+  setup?: string
   ext: Record<string, unknown>
 }
 
@@ -70,6 +74,8 @@ export interface Scene {
   name: string
   location: string
   color?: string
+  /** Shot-IDs in der vom Nutzer gewählten Reihenfolge. Fehlende Shots werden chronologisch angehängt. */
+  order?: string[]
 }
 
 export interface SceneCandidate {

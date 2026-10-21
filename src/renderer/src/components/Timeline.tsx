@@ -125,6 +125,11 @@ export function Timeline(): React.JSX.Element {
           ctx.fillStyle = col
           ctx.fillRect(x0 + 0.5, R.s1 - 4, Math.max(0, w - 1), 4)
         }
+        const sceneCol = s.sceneId ? p.scenes.find((x) => x.id === s.sceneId)?.color : undefined
+        if (sceneCol) {
+          ctx.fillStyle = sceneCol
+          ctx.fillRect(x0 + 0.5, R.s0, Math.max(0, w - 1), 3)
+        }
         if (i === cur) {
           ctx.strokeStyle = '#fff'
           ctx.lineWidth = 2
