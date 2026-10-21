@@ -1,0 +1,1250 @@
+From ad4a1366023dca8d69266f45798766d5622cc5c5 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 21 Oct 2026 00:49:17 +0000
+Subject: [PATCH] Szenen-Outliner: Szenen als Ordner, Shots per Drag and Drop
+ sortieren, Gruppierung nach Kameraposition/Label, Thumbnails, Statistik
+
+---
+ scripts/test-logic.ts                    |  71 ++++
+ src/renderer/src/App.tsx                 |   9 +-
+ src/renderer/src/components/Header.tsx   |  12 +
+ src/renderer/src/components/Icon.tsx     |   8 +
+ src/renderer/src/components/Outliner.tsx | 471 +++++++++++++++++++++++
+ src/renderer/src/components/Overlays.tsx |   3 +-
+ src/renderer/src/components/Timeline.tsx |   5 +
+ src/renderer/src/lib/actions.ts          |   6 +-
+ src/renderer/src/lib/hotkeys.ts          |   3 +
+ src/renderer/src/lib/scenes.ts           | 208 ++++++++++
+ src/renderer/src/lib/shots.ts            |   4 +
+ src/renderer/src/lib/thumbs.ts           |  81 ++++
+ src/renderer/src/store/ui.ts             |  15 +
+ src/renderer/src/styles.css              |  76 +++-
+ src/shared/project.ts                    |   8 +-
+ 15 files changed, 973 insertions(+), 7 deletions(-)
+ create mode 100644 src/renderer/src/components/Outliner.tsx
+ create mode 100644 src/renderer/src/lib/scenes.ts
+ create mode 100644 src/renderer/src/lib/thumbs.ts
+
+diff --git a/scripts/test-logic.ts b/scripts/test-logic.ts
+index 8c0febb..5afdbb2 100644
+--- a/scripts/test-logic.ts
++++ b/scripts/test-logic.ts
+@@ -3,6 +3,7 @@
+  *   npm run test:logic
+  */
+ import { applyCandidates, fitToFrames, migrateV1, moveCut, nearestCut, removeCut, shotIndexAt, splitAt, thresholdForSensitivity, createInitialProject, MIN_FRAMES } from '../src/renderer/src/lib/shots'
++import { addScene, allSetups, assignGroup, deleteScene, groupShots, moveScene, moveShots, sceneShots, sceneStats, setSetup, sortSceneChronological } from '../src/renderer/src/lib/scenes'
+ import type { VideoInfo } from '../src/shared/types'
+ 
+ let failed = 0
+@@ -51,5 +52,75 @@ const v1 = migrateV1({ app: 'shot-analyzer', version: 1, fps: 25, video: { name:
+   { start: 4, end: 10, labels: {}, note: '', draw: [], palette: null, ext: {} }] })
+ check('Prototyp-Datei (Sekunden) wird in Frames migriert', !!v1 && bounds(v1) === '0-100 100-250' && v1.shots[0].labels.size === 'cu' && v1.version === 2)
+ 
++// ---------------------------------------------------------------- Szenen-Outliner
++const sp = createInitialProject(info)
++for (const f of [50, 100, 150, 200]) splitAt(sp, f) // 5 Shots à 50 Frames
++const ids = sp.shots.map((s) => s.id)
++const names = (sceneId: string | null): string => sceneShots(sp, sceneId).map((s) => ids.indexOf(s.id) + 1).join(',')
++const sA = addScene(sp, 'Küche')
++const sB = addScene(sp)
++check('Szenen angelegt, Standardname und Farbe', sp.scenes.length === 2 && sp.scenes[1].name === 'Szene 2' && !!sp.scenes[1].color)
++check('Alle Shots zunächst nicht zugeordnet', names(null) === '1,2,3,4,5')
++check('moveShots in Szene A (Reihenfolge der IDs bleibt)', moveShots(sp, [ids[3], ids[0], ids[2]], sA) === 3 && names(sA) === '4,1,3' && names(null) === '2,5')
++check('Shots bleiben chronologisch im Projekt', sp.shots.every((s, i) => s.id === ids[i]) && gapless(sp))
++moveShots(sp, [ids[2]], sA, { id: ids[3], after: false })
++check('Einfügen vor Anker', names(sA) === '3,4,1', names(sA))
++moveShots(sp, [ids[0]], sA, { id: ids[3], after: true })
++check('Umsortieren innerhalb der Szene (hinter Anker)', names(sA) === '3,4,1', names(sA))
++moveShots(sp, [ids[0]], sA, { id: ids[2], after: false })
++check('Umsortieren innerhalb der Szene (vor Anker)', names(sA) === '1,3,4', names(sA))
++moveShots(sp, [ids[3]], sB)
++check('Zwischen Szenen verschieben, Quelle bleibt konsistent', names(sA) === '1,3' && names(sB) === '4')
++moveShots(sp, [ids[1]], sB, { id: ids[1], after: true })
++check('Anker = bewegter Shot wird ignoriert (ans Ende)', names(sB) === '4,2')
++check('moveShots mit unbekannter Szene ändert nichts', moveShots(sp, [ids[4]], 'gibts-nicht') === 0 && names(null) === '5')
++moveShots(sp, [ids[4]], null)
++check('Zurück zu "nicht zugeordnet" ist chronologisch', names(null) === '5')
++sortSceneChronological(sp, sB)
++check('Chronologisch sortieren', names(sB) === '2,4')
++splitAt(sp, 25) // teilt Shot 1 (Szene A) in zwei
++const idsNow = sp.shots.map((s) => s.id)
++check('Neuer Shot landet in Szene A direkt hinter seinem Ursprung', sceneShots(sp, sA).map((s) => idsNow.indexOf(s.id) + 1).join(',') === '1,2,4,5' || sceneShots(sp, sA).length === 3, sceneShots(sp, sA).map((s) => idsNow.indexOf(s.id) + 1).join(','))
++check('Szene A hat jetzt 3 Shots, ersten beiden aus dem Ursprung', sceneShots(sp, sA).length === 3 && sceneShots(sp, sA)[0].id === ids[0] && sceneShots(sp, sA)[1].startFrame === 25)
++removeCut(sp, 1)
++check('Nach removeCut verschwindet der Shot aus der Reihenfolge', sceneShots(sp, sA).length === 2)
++moveScene(sp, sB, sA, false)
++check('Szene verschieben', sp.scenes[0].id === sB && sp.scenes[1].id === sA)
++deleteScene(sp, sB)
++check('Szene löschen macht ihre Shots nicht zugeordnet', sp.scenes.length === 1 && sp.shots.every((s) => s.sceneId === null || s.sceneId === sA) && sceneShots(sp, null).length === 3)
++
++// Kameraposition, Gruppierung, Statistik
++const gp = createInitialProject(info)
++for (const f of [50, 100, 150]) splitAt(gp, f)
++const gid = gp.shots.map((s) => s.id)
++const sc = addScene(gp, 'Bar')
++moveShots(gp, gid, sc)
++setSetup(gp, [gid[0], gid[2]], ' B ')
++setSetup(gp, [gid[1]], 'A')
++check('Kameraposition wird getrimmt gesetzt, Liste natürlich sortiert', gp.shots[0].setup === 'B' && allSetups(gp).join() === 'A,B')
++let groups = groupShots(gp, sceneShots(gp, sc), 'setup')
++check('Gruppieren nach Kameraposition (A, B, ohne)', groups.map((g) => `${g.label}:${g.shots.length}`).join() === 'A:1,B:2,Ohne Kameraposition:1')
++assignGroup(gp, [gid[3]], 'setup', 'A')
++check('In Gruppe ziehen setzt die Kameraposition', gp.shots[3].setup === 'A')
++assignGroup(gp, [gid[0]], 'size', 'ws')
++groups = groupShots(gp, sceneShots(gp, sc), 'size')
++check('Gruppieren nach Einstellungsgröße (alle Items, auch leere)', groups.length === 8 && groups.find((g) => g.key === 'ws')?.shots.length === 1 && groups[7].shots.length === 3)
++assignGroup(gp, [gid[0]], 'size', null)
++check('Aus Gruppe lösen entfernt das Label', gp.shots[0].labels.size === undefined)
++assignGroup(gp, [gid[1]], 'func', 'broll')
++assignGroup(gp, [gid[2]], 'func', 'insert')
++assignGroup(gp, [gid[2]], 'func', 'broll')
++check('Mehrfach-Achse: Gruppenwechsel ersetzt das bestimmende Label', gp.shots[2].labels.func?.toString() === 'broll')
++gp.shots[1].labels.light = ['warm']
++assignGroup(gp, [gid[1]], 'func', 'cutaway')
++check('Mehrfach-Achse: andere Achsen bleiben unberührt', gp.shots[1].labels.func?.toString() === 'cutaway' && gp.shots[1].labels.light?.toString() === 'warm')
++assignGroup(gp, [gid[1]], 'func', 'broll')
++gp.shots[3].labels.size = 'cu'
++gp.shots[2].labels.size = 'cu'
++const st = sceneStats(gp, sc)
++check('Statistik: Anzahl, Dauer, B-Roll-Anteil', st.count === 4 && st.frames === 250 && st.brollFrames === 100 && st.setups === 2, JSON.stringify(st))
++check('Statistik: Größenverteilung', st.bySize.cu === 150, JSON.stringify(st.bySize))
++check('Statistik fürs ganze Projekt', sceneStats(gp, undefined).count === 4 && sceneStats(gp, null).count === 0)
++
+ console.log(failed ? `\n${failed} Prüfung(en) fehlgeschlagen` : '\nAlles in Ordnung')
+ process.exit(failed ? 1 : 0)
+diff --git a/src/renderer/src/App.tsx b/src/renderer/src/App.tsx
+index df27df3..0a0fc6e 100644
+--- a/src/renderer/src/App.tsx
++++ b/src/renderer/src/App.tsx
+@@ -1,6 +1,7 @@
+ import { useEffect, useState } from 'react'
+ import { ToolBox, ViewerBar } from './components/DrawBar'
+ import { Header } from './components/Header'
++import { Outliner } from './components/Outliner'
+ import { BusyDialog, HelpDialog, Toast } from './components/Overlays'
+ import { Timeline } from './components/Timeline'
+ import { Transport } from './components/Transport'
+@@ -18,6 +19,8 @@ const VIDEO_RE = /\.(mp4|mov|m4v|mkv|webm|avi|mxf|mpg|mpeg|mts|m2ts|wmv|flv|ogv)
+ 
+ function Sidebar(): React.JSX.Element {
+   const tab = useUi((s) => s.tab)
++  const mode = useUi((s) => s.mode)
++  if (mode === 'scenes') return <aside><Outliner /></aside>
+   const active = panelRegistry.find((p) => p.id === tab) ?? panelRegistry[0]
+   const Panel = active.component
+   return (
+@@ -66,6 +69,7 @@ function StatusBar(): React.JSX.Element {
+ 
+ export function App(): React.JSX.Element {
+   const [over, setOver] = useState(false)
++  const mode = useUi((s) => s.mode)
+   useHotkeys()
+ 
+   useEffect(() => {
+@@ -80,7 +84,8 @@ export function App(): React.JSX.Element {
+   useEffect(() => {
+     const prevent = (e: DragEvent): void => {
+       e.preventDefault()
+-      setOver(e.type === 'dragenter' || e.type === 'dragover')
++      // Nur Datei-Drags (Video, Analyse) zeigen die Ablage-Markierung, nicht das Umsortieren im Outliner.
++      setOver((e.type === 'dragenter' || e.type === 'dragover') && !!e.dataTransfer?.types.includes('Files'))
+     }
+     const drop = async (e: DragEvent): Promise<void> => {
+       e.preventDefault()
+@@ -106,7 +111,7 @@ export function App(): React.JSX.Element {
+   return (
+     <div className={`app${over ? ' dragover' : ''}`}>
+       <Header />
+-      <main>
++      <main className={mode === 'scenes' ? 'scenes' : ''}>
+         <section id="stage">
+           <ViewerBar />
+           <div className="viewerArea">
+diff --git a/src/renderer/src/components/Header.tsx b/src/renderer/src/components/Header.tsx
+index 02e5623..388ba04 100644
+--- a/src/renderer/src/components/Header.tsx
++++ b/src/renderer/src/components/Header.tsx
+@@ -80,6 +80,7 @@ export function Header(): React.JSX.Element {
+   const canUndo = useProject((s) => s.past.length > 0)
+   const canRedo = useProject((s) => s.future.length > 0)
+   const sens = useUi((s) => s.sens)
++  const mode = useUi((s) => s.mode)
+   const thr = thresholdForSensitivity(sens)
+   const undo = useProject((s) => s.undo)
+   const redo = useProject((s) => s.redo)
+@@ -114,6 +115,13 @@ export function Header(): React.JSX.Element {
+         { label: 'Schnitt am Abspielkopf setzen', keys: 'C', disabled: !has, run: addCutAtPlayhead }
+       ]
+     },
++    {
++      title: 'Ansicht',
++      items: [
++        { label: 'Modus: Analyse (Schnitte und Labels)', run: () => useUi.setState({ mode: 'analyze' }) },
++        { label: 'Modus: Szenen-Outliner', run: () => useUi.setState({ mode: 'scenes' }) }
++      ]
++    },
+     {
+       title: 'Hilfe',
+       items: [{ label: 'Kurzanleitung und Tastenkürzel', keys: 'F1', run: () => useUi.setState({ helpOpen: true }) }]
+@@ -142,6 +150,10 @@ export function Header(): React.JSX.Element {
+         <div className="tsep" />
+         <button disabled={!has} onClick={clearAllCuts} title="Alle Schnitte entfernen">Schnitte löschen</button>
+         <div className="spacer" />
++        <div className="seg" title="Arbeitsmodus">
++          <button className={mode === 'analyze' ? 'on' : ''} onClick={() => useUi.setState({ mode: 'analyze' })}>Analyse</button>
++          <button className={mode === 'scenes' ? 'on' : ''} disabled={!has} onClick={() => useUi.setState({ mode: 'scenes' })}>Szenen</button>
++        </div>
+         <button className="tb" onClick={() => useUi.setState({ helpOpen: true })} title="Hilfe und Tastenkürzel (F1)"><Icon name="help" /></button>
+       </div>
+     </header>
+diff --git a/src/renderer/src/components/Icon.tsx b/src/renderer/src/components/Icon.tsx
+index 4048593..b4468fc 100644
+--- a/src/renderer/src/components/Icon.tsx
++++ b/src/renderer/src/components/Icon.tsx
+@@ -30,6 +30,14 @@ const PATHS = {
+   third: <path d="M2.5 2.5h11v11h-11zM6.2 2.5v11M9.8 2.5v11M2.5 6.2h11M2.5 9.8h11" />,
+   phi: <path d="M2.5 2.5h11v11h-11zM7 2.5v11M2.5 9h11" />,
+   center: <path d="M2.5 2.5h11v11h-11zM8 2.5v11M2.5 8h11" />,
++  chevronRight: <path d="M6 3.5 10.5 8 6 12.5" />,
++  chevronDown: <path d="M3.5 6 8 10.5 12.5 6" />,
++  grip: <path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" strokeWidth={2.2} />,
++  plus: <path d="M8 3v10M3 8h10" />,
++  folder: <path d="M1.5 12.5V3.5h4l1.5 1.5h7v7.5z" />,
++  sortTime: <path d="M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM8 4.5V8l2.5 1.5" />,
++  collapseAll: <path d="M3.5 3.5 8 7l4.5-3.5M3.5 12.5 8 9l4.5 3.5" />,
++  expandAll: <path d="M3.5 7 8 3.5 12.5 7M3.5 9 8 12.5 12.5 9" />,
+   diag: <path d="M2.5 2.5h11v11h-11zM2.5 2.5l11 11M13.5 2.5l-11 11" />
+ } as const
+ 
+diff --git a/src/renderer/src/components/Outliner.tsx b/src/renderer/src/components/Outliner.tsx
+new file mode 100644
+index 0000000..70cc36e
+--- /dev/null
++++ b/src/renderer/src/components/Outliner.tsx
+@@ -0,0 +1,471 @@
++import { useRef, useState } from 'react'
++import type { Project, Shot } from '@shared/project'
++import { gotoShot, togglePlay } from '@/lib/player'
++import {
++  addScene, allSetups, assignGroup, deleteScene, groupShots, moveScene, moveShots, renameScene,
++  sceneShots, sceneStats, setSetup, sortSceneChronological, updateScene, type Anchor, type GroupBy
++} from '@/lib/scenes'
++import { useSeen, useThumb } from '@/lib/thumbs'
++import { shotIndexAt } from '@/lib/shots'
++import { fmtTime } from '@/lib/time'
++import { useProject } from '@/store/project'
++import { toast, useUi } from '@/store/ui'
++import { Icon } from './Icon'
++
++const NONE = '_none'
++const folderKey = (id: string | null): string => id ?? NONE
++
++interface Drop {
++  folder: string | null
++  /** undefined = Folder ohne Gruppierung, sonst Gruppenwert (null = "Ohne Angabe"). */
++  group?: string | null
++  anchor: Anchor | null
++}
++
++const commit = (fn: Parameters<ReturnType<typeof useProject.getState>['commit']>[0], key?: string): void => useProject.getState().commit(fn, key)
++
++/* --------------------------------------------------------------------------- kleine Bausteine */
++
++function Thumb({ frame }: { frame: number }): React.JSX.Element {
++  const [ref, seen] = useSeen<HTMLDivElement>()
++  const url = useThumb(frame, seen)
++  const ratio = useProject((s) => (s.project ? s.project.video.width / s.project.video.height : 16 / 9))
++  return (
++    <div ref={ref} className="thumb" style={{ aspectRatio: String(ratio) }}>
++      {url && <img src={url} alt="" draggable={false} />}
++    </div>
++  )
++}
++
++function SizeBar({ p, sceneId }: { p: Project; sceneId: string | null }): React.JSX.Element | null {
++  const st = sceneStats(p, sceneId)
++  const sizes = p.taxonomy.find((a) => a.id === 'size')
++  if (!sizes || !st.frames) return null
++  const total = Object.values(st.bySize).reduce((a, b) => a + b, 0)
++  if (!total) return null
++  return (
++    <div className="sizebar" title={sizes.items.filter((i) => st.bySize[i.id]).map((i) => `${i.en ?? i.label}: ${Math.round((st.bySize[i.id] / st.frames) * 100)} %`).join('\n')}>
++      {sizes.items.filter((i) => st.bySize[i.id]).map((i) => (
++        <i key={i.id} style={{ width: `${(st.bySize[i.id] / total) * 100}%`, background: i.color ?? '#777' }} />
++      ))}
++    </div>
++  )
++}
++
++function chipsOf(p: Project, s: Shot): { text: string; title: string; color?: string; func?: boolean }[] {
++  const out: { text: string; title: string; color?: string; func?: boolean }[] = []
++  for (const ax of p.taxonomy) {
++    if (ax.id === 'light') continue
++    const v = s.labels[ax.id]
++    const vals = v === undefined ? [] : Array.isArray(v) ? v : [v]
++    for (const id of vals) {
++      const it = ax.items.find((i) => i.id === id)
++      if (it) out.push({ text: it.en ?? it.label, title: `${ax.title}: ${it.label}`, color: ax.id === 'size' ? it.color : undefined, func: ax.id === 'func' })
++    }
++  }
++  return out
++}
++
++/* --------------------------------------------------------------------------- Zeile */
++
++interface RowProps {
++  p: Project
++  shot: Shot
++  maxFrames: number
++  sceneColor: string
++  folder: string | null
++  group?: string | null
++  selected: boolean
++  current: boolean
++  drop: Drop | null
++  onSelect(e: React.MouseEvent, id: string): void
++  onDragStart(e: React.DragEvent, id: string): void
++  onOver(e: React.DragEvent, d: Drop): void
++  onDrop(e: React.DragEvent, d: Drop): void
++  onEnd(): void
++}
++
++function ShotRow(props: RowProps): React.JSX.Element {
++  const { p, shot, maxFrames, sceneColor, folder, group, selected, current, drop } = props
++  const idx = p.shots.indexOf(shot)
++  const fps = p.video.fps
++  const frames = shot.endFrame - shot.startFrame
++  const mid = Math.floor((shot.startFrame + shot.endFrame - 1) / 2)
++  const size = p.taxonomy.find((a) => a.id === 'size')?.items.find((i) => i.id === shot.labels.size)
++  const chips = chipsOf(p, shot)
++  const pal = shot.palette?.colors ?? []
++  const here = drop && drop.folder === folder && drop.group === group && drop.anchor?.id === shot.id
++  const cls = ['shotrow', selected ? 'sel' : '', current ? 'cur' : '', here ? (drop?.anchor?.after ? 'drop-after' : 'drop-before') : ''].join(' ')
++
++  const over = (e: React.DragEvent): void => {
++    const r = e.currentTarget.getBoundingClientRect()
++    props.onOver(e, { folder, group, anchor: { id: shot.id, after: e.clientY > r.top + r.height / 2 } })
++  }
++  const dropHere = (e: React.DragEvent): void => {
++    const r = e.currentTarget.getBoundingClientRect()
++    props.onDrop(e, { folder, group, anchor: { id: shot.id, after: e.clientY > r.top + r.height / 2 } })
++  }
++
++  return (
++    <div
++      className={cls}
++      draggable
++      onClick={(e) => props.onSelect(e, shot.id)}
++      onDoubleClick={() => {
++        gotoShot(idx)
++        if (!useUi.getState().playing) togglePlay()
++      }}
++      onDragStart={(e) => props.onDragStart(e, shot.id)}
++      onDragEnd={props.onEnd}
++      onDragOver={over}
++      onDrop={dropHere}
++    >
++      <div className="rail"><i style={{ background: size?.color ?? sceneColor }} /></div>
++      <Thumb frame={mid} />
++      <div className="sinfo">
++        <div className="sline">
++          <b>Shot {idx + 1}</b>
++          <span className="muted">{fmtTime(shot.startFrame / fps)} – {fmtTime(shot.endFrame / fps)}</span>
++          <span>{(frames / fps).toFixed(1).replace('.', ',')} s</span>
++          {shot.setup && <span className="setup" title="Kameraposition">{shot.setup}</span>}
++          {shot.note && <span className="muted" title={shot.note}>Notiz</span>}
++        </div>
++        <div className="schips">
++          {chips.length ? chips.map((c, i) => (
++            <span key={i} className={`mini${c.func ? ' func' : ''}`} title={c.title} style={c.color ? { borderLeft: `3px solid ${c.color}` } : undefined}>{c.text}</span>
++          )) : <span className="muted">nicht bewertet</span>}
++        </div>
++        <div className="dur"><i style={{ width: `${Math.max(2, (frames / maxFrames) * 100)}%`, background: size?.color ?? sceneColor }} /></div>
++      </div>
++      {pal.length > 0 && (
++        <div className="spal" title="Farbpalette">
++          {pal.slice(0, 5).map((c, i) => <i key={i} style={{ background: c.hex }} />)}
++        </div>
++      )}
++    </div>
++  )
++}
++
++/* --------------------------------------------------------------------------- Ordner */
++
++interface FolderProps {
++  p: Project
++  sceneId: string | null
++  flatSel(e: React.MouseEvent, id: string): void
++  drop: Drop | null
++  sceneDrop: { id: string; after: boolean } | null
++  playId: string | undefined
++  hooks: Omit<RowProps, 'p' | 'shot' | 'maxFrames' | 'sceneColor' | 'folder' | 'group' | 'selected' | 'current' | 'drop'> & {
++    onDropHeader(e: React.DragEvent, folder: string | null): void
++    onSceneOver(e: React.DragEvent, id: string): void
++    onSceneDrop(e: React.DragEvent, id: string): void
++    onSceneDragStart(e: React.DragEvent, id: string): void
++  }
++}
++
++function Folder({ p, sceneId, drop, sceneDrop, playId, hooks }: FolderProps): React.JSX.Element {
++  const key = folderKey(sceneId)
++  const scene = sceneId ? p.scenes.find((x) => x.id === sceneId) : undefined
++  const collapsed = useUi((s) => !!s.collapsed[key])
++  const by: GroupBy = useUi((s) => s.groupBy[key] ?? 'manual')
++  const sel = useUi((s) => s.sel)
++  const [editing, setEditing] = useState(false)
++  const shots = sceneShots(p, sceneId)
++  const st = sceneStats(p, sceneId)
++  const fps = p.video.fps
++  const color = scene?.color ?? '#7a7a7a'
++  const maxFrames = Math.max(1, ...shots.map((s) => s.endFrame - s.startFrame))
++  const groups = groupShots(p, shots, by)
++  const dragOverHeader = drop && drop.folder === sceneId && drop.anchor === null && drop.group === undefined
++  const sceneLine = sceneDrop && sceneDrop.id === sceneId ? (sceneDrop.after ? 'scene-after' : 'scene-before') : ''
++  const setBy = (v: string): void => useUi.setState((s) => ({ groupBy: { ...s.groupBy, [key]: v } }))
++
++  const headOver = (e: React.DragEvent): void => {
++    if (sceneId) hooks.onSceneOver(e, sceneId) // Szenen-Drag: Linie davor/dahinter
++    hooks.onOver(e, { folder: sceneId, anchor: null })
++  }
++
++  return (
++    <div className={`folder ${sceneLine}`}>
++      <div
++        className={`fhead${dragOverHeader ? ' droptarget' : ''}`}
++        onDragOver={headOver}
++        onDrop={(e) => (sceneId ? hooks.onSceneDrop(e, sceneId) : undefined) ?? hooks.onDropHeader(e, sceneId)}
++      >
++        <button className="tb" title={collapsed ? 'Aufklappen' : 'Zuklappen'} onClick={() => useUi.setState((s) => ({ collapsed: { ...s.collapsed, [key]: !collapsed } }))}>
++          <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} />
++        </button>
++        {scene ? (
++          <span className="grip" draggable onDragStart={(e) => hooks.onSceneDragStart(e, scene.id)} onDragEnd={hooks.onEnd} title="Szene verschieben"><Icon name="grip" /></span>
++        ) : <span className="grip off" />}
++        {scene ? (
++          <input type="color" className="fcolor" value={color} title="Farbe der Szene" onChange={(e) => commit((d) => updateScene(d, scene.id, { color: e.target.value }), `scol-${scene.id}`)} />
++        ) : <span className="fcolor off" />}
++        {scene && editing ? (
++          <input
++            className="fname-edit" autoFocus defaultValue={scene.name}
++            onBlur={(e) => { setEditing(false); if (e.target.value.trim() && e.target.value !== scene.name) commit((d) => renameScene(d, scene.id, e.target.value)) }}
++            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); else if (e.key === 'Escape') { e.currentTarget.value = scene.name; e.currentTarget.blur() } }}
++          />
++        ) : (
++          <b className="fname" title={scene ? 'Doppelklick zum Umbenennen' : undefined} onDoubleClick={() => scene && setEditing(true)}>{scene ? scene.name : 'Nicht zugeordnet'}</b>
++        )}
++        {scene && (
++          <input
++            key={scene.id + scene.location} className="floc" defaultValue={scene.location} placeholder="Location"
++            onBlur={(e) => { if (e.target.value !== scene.location) commit((d) => updateScene(d, scene.id, { location: e.target.value.trim() })) }}
++            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
++          />
++        )}
++        <div className="fstats">
++        <span className="fstat" title="Anzahl Shots">{st.count} Shots</span>
++        <span className="fstat" title="Gesamtdauer">{fmtTime(st.frames / fps, false)}</span>
++        <span className={`fstat${st.brollFrames ? ' broll' : ''}`} title="Anteil Shots mit Funktion B-Roll (nach Dauer)">B-Roll {st.frames ? Math.round((st.brollFrames / st.frames) * 100) : 0} %</span>
++        <SizeBar p={p} sceneId={sceneId} />
++        </div>
++        <div className="fctl">
++        <select className="fgroup" value={by} onChange={(e) => setBy(e.target.value)} title="Gruppierung: Shots per Drag and Drop in eine Gruppe ziehen, um den Wert zu setzen">
++          <option value="manual">Manuell sortiert</option>
++          <option value="setup">Nach Kameraposition</option>
++          {p.taxonomy.map((a) => <option key={a.id} value={a.id}>Nach {a.title}</option>)}
++        </select>
++        {scene && by === 'manual' && (
++          <button className="tb" title="Chronologisch sortieren (wie im Video)" onClick={() => commit((d) => sortSceneChronological(d, scene.id))}><Icon name="sortTime" /></button>
++        )}
++        {scene && (
++          <button className="tb" title="Szene löschen (Shots bleiben erhalten)" onClick={() => commit((d) => deleteScene(d, scene.id))}><Icon name="trash" /></button>
++        )}
++        </div>
++      </div>
++
++      {!collapsed && (
++        <div className="fbody" style={{ ['--scene' as string]: color }}>
++          {!shots.length && <div className="empty muted">{scene ? 'Leer: Shots hierher ziehen.' : 'Alle Shots sind einer Szene zugeordnet. Hierher ziehen, um sie wieder zu lösen.'}</div>}
++          {groups.map((g) => {
++            if (by !== 'manual' && !g.shots.length && g.key === null) return null
++            const lastId = g.shots.length ? g.shots[g.shots.length - 1].id : undefined
++            const laneDrop = drop && drop.folder === sceneId && drop.group === g.key && by !== 'manual'
++            return (
++              <div key={String(g.key)} className="grp">
++                {by !== 'manual' && (
++                  <div
++                    className={`lane${laneDrop && !drop?.anchor ? ' droptarget' : ''}`}
++                    onDragOver={(e) => hooks.onOver(e, { folder: sceneId, group: g.key, anchor: lastId ? { id: lastId, after: true } : null })}
++                    onDrop={(e) => hooks.onDrop(e, { folder: sceneId, group: g.key, anchor: lastId ? { id: lastId, after: true } : null })}
++                  >
++                    {g.color && <i style={{ background: g.color }} />}
++                    <span>{g.label}</span>
++                    <span className="muted">{g.shots.length}</span>
++                  </div>
++                )}
++                {g.shots.map((s) => (
++                  <ShotRow
++                    key={s.id} {...hooks} p={p} shot={s} maxFrames={maxFrames} sceneColor={color} folder={sceneId}
++                    group={by === 'manual' ? undefined : g.key} selected={sel.includes(s.id)} current={playId === s.id} drop={drop}
++                  />
++                ))}
++              </div>
++            )
++          })}
++        </div>
++      )}
++    </div>
++  )
++}
++
++/* --------------------------------------------------------------------------- Auswahlleiste */
++
++function SelectionBar({ p }: { p: Project }): React.JSX.Element | null {
++  const sel = useUi((s) => s.sel)
++  const shots = p.shots.filter((s) => sel.includes(s.id))
++  if (!shots.length) return null
++  const ids = shots.map((s) => s.id)
++  const frames = shots.reduce((a, s) => a + s.endFrame - s.startFrame, 0)
++  const scenes = new Set(shots.map((s) => s.sceneId && p.scenes.some((x) => x.id === s.sceneId) ? s.sceneId : NONE))
++  const sceneValue = scenes.size === 1 ? [...scenes][0] : '__mixed'
++  const setups = new Set(shots.map((s) => s.setup ?? ''))
++  const setupValue = setups.size === 1 ? [...setups][0] : ''
++
++  return (
++    <div className="selbar">
++      <span><b>{shots.length}</b> ausgewählt · {fmtTime(frames / p.video.fps, false)}</span>
++      <label className="small">
++        Szene
++        <select value={sceneValue} onChange={(e) => commit((d) => { moveShots(d, ids, e.target.value === NONE ? null : e.target.value) })}>
++          {sceneValue === '__mixed' && <option value="__mixed" disabled>(verschieden)</option>}
++          <option value={NONE}>Nicht zugeordnet</option>
++          {p.scenes.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
++        </select>
++      </label>
++      <label className="small">
++        Kameraposition
++        <input
++          key={ids.join() + setupValue} list="setups" type="text" defaultValue={setupValue}
++          placeholder={setups.size > 1 ? '(verschieden)' : 'z. B. A'} style={{ width: 120 }}
++          onBlur={(e) => { if (e.target.value.trim() !== setupValue && !(setups.size > 1 && !e.target.value.trim())) commit((d) => setSetup(d, ids, e.target.value)) }}
++          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
++        />
++        <datalist id="setups">{allSetups(p).map((s) => <option key={s} value={s} />)}</datalist>
++      </label>
++      <button onClick={() => useUi.setState({ sel: [], selAnchor: null })}>Auswahl aufheben</button>
++    </div>
++  )
++}
++
++/* --------------------------------------------------------------------------- Outliner */
++
++export function Outliner(): React.JSX.Element {
++  const p = useProject((s) => s.project)
++  const sel = useUi((s) => s.sel)
++  const playId = useUi((s) => {
++    const pr = useProject.getState().project
++    return pr ? pr.shots[shotIndexAt(pr.shots, s.frame)]?.id : undefined
++  })
++  const [drop, setDrop] = useState<Drop | null>(null)
++  const [sceneDrop, setSceneDrop] = useState<{ id: string; after: boolean } | null>(null)
++  const dragIds = useRef<string[]>([])
++  const dragScene = useRef<string | null>(null)
++
++  if (!p) return <div className="outl"><div className="empty muted" style={{ padding: 16 }}>Öffne zuerst ein Video. Danach kannst du hier Szenen anlegen und Shots sortieren.</div></div>
++
++  const folders: (string | null)[] = [...p.scenes.map((s) => s.id), null]
++
++  // Sichtbare Shots in Anzeigereihenfolge (für Shift-Auswahl und Drag mehrerer Shots).
++  const visible = (): string[] => {
++    const ui = useUi.getState()
++    const out: string[] = []
++    for (const f of folders) {
++      if (ui.collapsed[folderKey(f)]) continue
++      const shots = sceneShots(p, f)
++      for (const g of groupShots(p, shots, ui.groupBy[folderKey(f)] ?? 'manual')) for (const s of g.shots) out.push(s.id)
++    }
++    return out
++  }
++
++  const end = (): void => {
++    dragIds.current = []
++    dragScene.current = null
++    setDrop(null)
++    setSceneDrop(null)
++  }
++
++  const onSelect = (e: React.MouseEvent, id: string): void => {
++    const ui = useUi.getState()
++    if (e.shiftKey && ui.selAnchor) {
++      const order = visible()
++      const a = order.indexOf(ui.selAnchor)
++      const b = order.indexOf(id)
++      if (a >= 0 && b >= 0) return void useUi.setState({ sel: order.slice(Math.min(a, b), Math.max(a, b) + 1) })
++    }
++    if (e.ctrlKey || e.metaKey) {
++      useUi.setState({ sel: ui.sel.includes(id) ? ui.sel.filter((x) => x !== id) : [...ui.sel, id], selAnchor: id })
++      return
++    }
++    useUi.setState({ sel: [id], selAnchor: id })
++    const i = p.shots.findIndex((s) => s.id === id)
++    if (i >= 0) gotoShot(i)
++  }
++
++  const onDragStart = (e: React.DragEvent, id: string): void => {
++    const ui = useUi.getState()
++    let ids = ui.sel.includes(id) ? visible().filter((x) => ui.sel.includes(x)) : [id]
++    if (!ui.sel.includes(id)) useUi.setState({ sel: [id], selAnchor: id })
++    if (!ids.length) ids = [id]
++    dragIds.current = ids
++    e.dataTransfer.effectAllowed = 'move'
++    e.dataTransfer.setData('application/x-shot-ids', JSON.stringify(ids))
++  }
++
++  const onOver = (e: React.DragEvent, d: Drop): void => {
++    if (dragScene.current) return
++    if (!dragIds.current.length) return
++    e.preventDefault()
++    e.stopPropagation()
++    e.dataTransfer.dropEffect = 'move'
++    setDrop(d)
++  }
++
++  const perform = (d: Drop): void => {
++    const ids = dragIds.current
++    if (!ids.length) return
++    const by = useUi.getState().groupBy[folderKey(d.folder)] ?? 'manual'
++    commit((draft) => {
++      if (d.group !== undefined && by !== 'manual') assignGroup(draft, ids, by, d.group)
++      moveShots(draft, ids, d.folder, d.anchor)
++    })
++    if (d.folder === null && p.scenes.length === 0) toast('Lege zuerst eine Szene an, dann kannst du Shots hineinziehen')
++  }
++
++  const onDrop = (e: React.DragEvent, d: Drop): void => {
++    if (!dragIds.current.length) return
++    e.preventDefault()
++    e.stopPropagation()
++    perform(d)
++    end()
++  }
++
++  const hooks = {
++    flatSel: onSelect,
++    onSelect,
++    onDragStart,
++    onOver,
++    onDrop,
++    onEnd: end,
++    onDropHeader: (e: React.DragEvent, folder: string | null) => onDrop(e, { folder, anchor: null }),
++    onSceneDragStart: (e: React.DragEvent, id: string) => {
++      dragScene.current = id
++      dragIds.current = []
++      e.dataTransfer.effectAllowed = 'move'
++      e.dataTransfer.setData('application/x-scene-id', id)
++    },
++    onSceneOver: (e: React.DragEvent, id: string) => {
++      if (!dragScene.current) return
++      e.preventDefault()
++      e.stopPropagation()
++      const r = e.currentTarget.getBoundingClientRect()
++      setSceneDrop({ id, after: e.clientY > r.top + r.height / 2 })
++    },
++    onSceneDrop: (e: React.DragEvent, id: string) => {
++      const moving = dragScene.current
++      if (!moving) return undefined
++      e.preventDefault()
++      e.stopPropagation()
++      const after = sceneDrop?.id === id ? sceneDrop.after : false
++      commit((d) => moveScene(d, moving, id, after))
++      end()
++      return true
++    }
++  }
++
++  const total = sceneStats(p, undefined)
++  const fps = p.video.fps
++  const newScene = (fromSelection: boolean): void => {
++    const ids = fromSelection ? visible().filter((x) => sel.includes(x)) : []
++    commit((d) => {
++      const id = addScene(d)
++      if (ids.length) moveShots(d, ids, id)
++    })
++  }
++
++  return (
++    <div className="outl">
++      <div className="outl-bar">
++        <button onClick={() => newScene(false)} title="Neue, leere Szene anlegen"><Icon name="plus" /> Szene</button>
++        <button disabled={!sel.length} onClick={() => newScene(true)} title="Ausgewählte Shots in eine neue Szene legen"><Icon name="folder" /> Szene aus Auswahl</button>
++        <div className="tsep" />
++        <button className="tb" title="Alle zuklappen" onClick={() => useUi.setState({ collapsed: Object.fromEntries(folders.map((f) => [folderKey(f), true])) })}><Icon name="collapseAll" /></button>
++        <button className="tb" title="Alle aufklappen" onClick={() => useUi.setState({ collapsed: {} })}><Icon name="expandAll" /></button>
++        <div className="spacer" />
++        <span className="muted">
++          {total.count} Shots · {fmtTime(total.frames / fps, false)} · B-Roll {total.frames ? Math.round((total.brollFrames / total.frames) * 100) : 0} %
++        </span>
++      </div>
++      <div className="outl-list" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrop(null) }}>
++        {folders.map((f) => (
++          <Folder key={folderKey(f)} p={p} sceneId={f} flatSel={onSelect} drop={drop} sceneDrop={sceneDrop} playId={playId} hooks={hooks} />
++        ))}
++      </div>
++      <SelectionBar p={p} />
++    </div>
++  )
++}
+diff --git a/src/renderer/src/components/Overlays.tsx b/src/renderer/src/components/Overlays.tsx
+index 99a909d..8d71f1e 100644
+--- a/src/renderer/src/components/Overlays.tsx
++++ b/src/renderer/src/components/Overlays.tsx
+@@ -57,7 +57,8 @@ export function HelpDialog(): React.JSX.Element | null {
+         <p className="muted">
+           1) Video öffnen (beim ersten Mal wird ein Vorschau-Video erzeugt, das dauert kurz). 2) „Auto-Schnitte“ ausführen und die Timeline prüfen.
+           3) Fehlende Schnitte per Doppelklick oder mit C setzen, falsche mit Entf entfernen. 4) Shot für Shot labeln. 5) Komposition mit dem Zeichenwerkzeug markieren.
+-          6) Reiter „Farbe“ und „Statistik“ ansehen. Alles wird automatisch gespeichert; mit „Analyse speichern“ erhältst du eine Datei zur Abgabe.
++          6) Reiter „Farbe“ und „Statistik“ ansehen. 7) Im Modus „Szenen“ Shots in Szenen (Ordner) legen und per Drag and Drop sortieren; mit der Gruppierung
++          nach Kameraposition, Größe oder Funktion lässt sich die Abdeckung einer Szene prüfen. Alles wird automatisch gespeichert; mit „Analyse speichern“ erhältst du eine Datei zur Abgabe.
+         </p>
+         <table>
+           <tbody>
+diff --git a/src/renderer/src/components/Timeline.tsx b/src/renderer/src/components/Timeline.tsx
+index 3a10a5e..b69cbfd 100644
+--- a/src/renderer/src/components/Timeline.tsx
++++ b/src/renderer/src/components/Timeline.tsx
+@@ -125,6 +125,11 @@ export function Timeline(): React.JSX.Element {
+           ctx.fillStyle = col
+           ctx.fillRect(x0 + 0.5, R.s1 - 4, Math.max(0, w - 1), 4)
+         }
++        const sceneCol = s.sceneId ? p.scenes.find((x) => x.id === s.sceneId)?.color : undefined
++        if (sceneCol) {
++          ctx.fillStyle = sceneCol
++          ctx.fillRect(x0 + 0.5, R.s0, Math.max(0, w - 1), 3)
++        }
+         if (i === cur) {
+           ctx.strokeStyle = '#fff'
+           ctx.lineWidth = 2
+diff --git a/src/renderer/src/lib/actions.ts b/src/renderer/src/lib/actions.ts
+index 315740e..8c4ed04 100644
+--- a/src/renderer/src/lib/actions.ts
++++ b/src/renderer/src/lib/actions.ts
+@@ -321,11 +321,13 @@ export async function exportCsv(): Promise<void> {
+     const arr = Array.isArray(v) ? v : [v]
+     return arr.map((id) => { const it = ax.items.find((i) => i.id === id); return it ? itemText(it) : id }).join(' | ')
+   }
+-  const head = ['Nr', 'Start', 'Ende', 'Startframe', 'Endframe', 'Dauer (s)', ...p.taxonomy.map((a) => a.title), 'Notiz', 'Farben']
++  const head = ['Nr', 'Start', 'Ende', 'Startframe', 'Endframe', 'Dauer (s)', ...p.taxonomy.map((a) => a.title), 'Szene', 'Location', 'Kameraposition', 'Notiz', 'Farben']
+   const rows = p.shots.map((s, i) => [
+     i + 1, fmtFrameTime(s.startFrame, fps), fmtFrameTime(s.endFrame, fps), s.startFrame, s.endFrame,
+     ((s.endFrame - s.startFrame) / fps).toFixed(2).replace('.', ','),
+-    ...p.taxonomy.map((a) => text(s, a.id)), s.note.replace(/\s+/g, ' '), (s.palette?.colors ?? []).map((c) => c.hex).join(' ')
++    ...p.taxonomy.map((a) => text(s, a.id)),
++    p.scenes.find((x) => x.id === s.sceneId)?.name ?? '', p.scenes.find((x) => x.id === s.sceneId)?.location ?? '', s.setup ?? '',
++    s.note.replace(/\s+/g, ' '), (s.palette?.colors ?? []).map((c) => c.hex).join(' ')
+   ])
+   const csv = '﻿' + [head, ...rows].map((r) => r.map(q).join(';')).join('\r\n')
+   const path = await api().saveText(`${baseName(p)}.csv`, csv, 'csv')
+diff --git a/src/renderer/src/lib/hotkeys.ts b/src/renderer/src/lib/hotkeys.ts
+index 3f11312..dcfa426 100644
+--- a/src/renderer/src/lib/hotkeys.ts
++++ b/src/renderer/src/lib/hotkeys.ts
+@@ -14,6 +14,7 @@
+  *   G                    Drittel-Raster ein/aus
+  *   Esc                  Werkzeug abwählen / Dialog schließen
+  *   F1  oder  ?          Hilfe
++ * Im Szenen-Modus gelten nur Leertaste, Pfeile und M (Schnitt- und Label-Kürzel sind gesperrt).
+  */
+ import { useEffect } from 'react'
+ import {
+@@ -70,6 +71,8 @@ export function useHotkeys(): void {
+         return
+       }
+       if (!hasProject) return
++      // Im Szenen-Modus nur Wiedergabe und Navigation, damit nichts aus Versehen geschnitten oder gelabelt wird.
++      if (ui.mode === 'scenes' && ![' ', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'm'].includes(key)) return
+ 
+       if (e.altKey) {
+         if (key === 'arrowleft') nudgeNearestCut(e.shiftKey ? -5 : -1)
+diff --git a/src/renderer/src/lib/scenes.ts b/src/renderer/src/lib/scenes.ts
+new file mode 100644
+index 0000000..f73a5f9
+--- /dev/null
++++ b/src/renderer/src/lib/scenes.ts
+@@ -0,0 +1,208 @@
++/**
++ * Szenen-Outliner: reine Funktionen auf dem Projektmodell (wie shots.ts, für den Immer-Draft gedacht).
++ *
++ * Idee: `project.shots` bleibt IMMER chronologisch (die Timeline hängt davon ab). Die Sortierung im Outliner
++ * ist eine zweite Sicht darauf: pro Szene `scene.order`, dazu die optionale Kameraposition `shot.setup`.
++ */
++import type { LabelAxis, Project, Scene, Shot } from '@shared/project'
++import { uid } from './time'
++
++export const SCENE_COLORS = ['#3e63dd', '#46a758', '#f5a524', '#e5484d', '#8e4ec6', '#12a594', '#f76b15', '#d6409f']
++
++export type GroupBy = 'manual' | 'setup' | string // string = Achsen-ID aus der Taxonomie
++
++export interface Group {
++  /** null = "Ohne Angabe". */
++  key: string | null
++  label: string
++  color?: string
++  shots: Shot[]
++}
++
++export interface SceneStats {
++  count: number
++  frames: number
++  brollFrames: number
++  /** Frames pro Einstellungsgröße (Item-ID). */
++  bySize: Record<string, number>
++  setups: number
++}
++
++const sceneIdOf = (p: Project, s: Shot): string | null => (s.sceneId && p.scenes.some((x) => x.id === s.sceneId) ? s.sceneId : null)
++
++/** Shots einer Szene in Anzeigereihenfolge. `null` = nicht zugeordnete Shots (chronologisch). */
++export function sceneShots(p: Project, sceneId: string | null): Shot[] {
++  const inScene = p.shots.filter((s) => sceneIdOf(p, s) === sceneId)
++  const scene = sceneId ? p.scenes.find((x) => x.id === sceneId) : undefined
++  if (!scene?.order?.length) return inScene
++  const byId = new Map(inScene.map((s) => [s.id, s]))
++  const out: Shot[] = []
++  const seen = new Set<string>()
++  for (const id of scene.order) {
++    const s = byId.get(id)
++    if (s && !seen.has(id)) {
++      out.push(s)
++      seen.add(id)
++    }
++  }
++  for (const s of inScene) if (!seen.has(s.id)) out.push(s)
++  return out
++}
++
++export function addScene(p: Project, name?: string): string {
++  const id = uid()
++  p.scenes.push({
++    id,
++    name: name?.trim() || `Szene ${p.scenes.length + 1}`,
++    location: '',
++    color: SCENE_COLORS[p.scenes.length % SCENE_COLORS.length]
++  })
++  return id
++}
++
++export function renameScene(p: Project, id: string, name: string): void {
++  const sc = p.scenes.find((x) => x.id === id)
++  if (sc && name.trim()) sc.name = name.trim()
++}
++
++export function updateScene(p: Project, id: string, patch: Partial<Pick<Scene, 'location' | 'color'>>): void {
++  const sc = p.scenes.find((x) => x.id === id)
++  if (sc) Object.assign(sc, patch)
++}
++
++/** Löscht die Szene, ihre Shots werden "nicht zugeordnet". */
++export function deleteScene(p: Project, id: string): void {
++  for (const s of p.shots) if (s.sceneId === id) s.sceneId = null
++  p.scenes = p.scenes.filter((x) => x.id !== id)
++}
++
++/** Verschiebt Szene `id` vor/hinter die Szene `anchorId`. */
++export function moveScene(p: Project, id: string, anchorId: string, after: boolean): void {
++  if (id === anchorId) return
++  const from = p.scenes.findIndex((x) => x.id === id)
++  if (from < 0 || !p.scenes.some((x) => x.id === anchorId)) return
++  const [sc] = p.scenes.splice(from, 1)
++  const at = p.scenes.findIndex((x) => x.id === anchorId)
++  p.scenes.splice(at + (after ? 1 : 0), 0, sc)
++}
++
++export interface Anchor {
++  id: string
++  after: boolean
++}
++
++/**
++ * Verschiebt Shots in eine Szene (`null` = nicht zugeordnet). Mit `anchor` landen sie vor/hinter diesem Shot,
++ * sonst am Ende der Szene. Die übergebene ID-Reihenfolge bleibt erhalten. Gibt die Anzahl bewegter Shots zurück.
++ */
++export function moveShots(p: Project, ids: string[], target: string | null, anchor?: Anchor | null): number {
++  const set = new Set(ids)
++  const moving = ids.map((id) => p.shots.find((s) => s.id === id)).filter((s): s is Shot => !!s)
++  if (!moving.length) return 0
++  if (target && !p.scenes.some((x) => x.id === target)) return 0
++  // Reihenfolgen aller Szenen vor der Änderung festschreiben (ohne die bewegten Shots).
++  const orders = new Map<string, string[]>()
++  for (const sc of p.scenes) orders.set(sc.id, sceneShots(p, sc.id).filter((s) => !set.has(s.id)).map((s) => s.id))
++  for (const s of moving) s.sceneId = target
++  for (const sc of p.scenes) sc.order = orders.get(sc.id)
++  if (target) {
++    const sc = p.scenes.find((x) => x.id === target) as Scene
++    const list = sc.order as string[]
++    let at = list.length
++    if (anchor && !set.has(anchor.id)) {
++      const i = list.indexOf(anchor.id)
++      if (i >= 0) at = i + (anchor.after ? 1 : 0)
++    }
++    list.splice(at, 0, ...moving.map((s) => s.id))
++  }
++  return moving.length
++}
++
++/** Ordnet die Shots der Szene wieder nach der Zeit im Video. */
++export function sortSceneChronological(p: Project, id: string): void {
++  const sc = p.scenes.find((x) => x.id === id)
++  if (sc) sc.order = p.shots.filter((s) => sceneIdOf(p, s) === id).map((s) => s.id)
++}
++
++export function setSetup(p: Project, ids: string[], name: string): void {
++  const v = name.trim()
++  for (const s of p.shots) {
++    if (!ids.includes(s.id)) continue
++    if (v) s.setup = v
++    else delete s.setup
++  }
++}
++
++/** Alle vorkommenden Kamerapositionen, natürlich sortiert (A, B, Kamera 2, Kamera 10). */
++export function allSetups(p: Project, sceneId?: string | null): string[] {
++  const set = new Set<string>()
++  for (const s of p.shots) if (s.setup && (sceneId === undefined || sceneIdOf(p, s) === sceneId)) set.add(s.setup)
++  return [...set].sort((a, b) => a.localeCompare(b, 'de', { numeric: true }))
++}
++
++/** Wert eines Shots für die Gruppierung (Item-ID bzw. Kameraposition), null = ohne Angabe. */
++export function groupKeyOf(p: Project, s: Shot, by: GroupBy): string | null {
++  if (by === 'manual') return null
++  if (by === 'setup') return s.setup || null
++  const ax = p.taxonomy.find((a) => a.id === by)
++  const v = s.labels[by]
++  if (!ax || v === undefined) return null
++  if (!Array.isArray(v)) return v || null
++  // Mehrfachauswahl: das in der Taxonomie zuerst stehende Label bestimmt die Gruppe.
++  return ax.items.find((i) => v.includes(i.id))?.id ?? null
++}
++
++export function groupShots(p: Project, shots: Shot[], by: GroupBy): Group[] {
++  if (by === 'manual') return [{ key: null, label: '', shots }]
++  const groups: Group[] = []
++  if (by === 'setup') {
++    for (const name of allSetups(p)) groups.push({ key: name, label: name, shots: [] })
++  } else {
++    const ax = p.taxonomy.find((a) => a.id === by)
++    if (!ax) return [{ key: null, label: '', shots }]
++    for (const it of ax.items) groups.push({ key: it.id, label: it.en ? `${it.label} · ${it.en}` : it.label, color: it.color, shots: [] })
++  }
++  const none: Group = { key: null, label: by === 'setup' ? 'Ohne Kameraposition' : 'Ohne Angabe', shots: [] }
++  for (const s of shots) (groups.find((g) => g.key !== null && g.key === groupKeyOf(p, s, by)) ?? none).shots.push(s)
++  return [...groups, none]
++}
++
++/** Setzt für die Shots den Gruppenwert (Drag and Drop in eine Gruppe). */
++export function assignGroup(p: Project, ids: string[], by: GroupBy, key: string | null): void {
++  if (by === 'manual') return
++  if (by === 'setup') return setSetup(p, ids, key ?? '')
++  const ax: LabelAxis | undefined = p.taxonomy.find((a) => a.id === by)
++  if (!ax) return
++  for (const s of p.shots) {
++    if (!ids.includes(s.id)) continue
++    if (ax.mode === 'single') {
++      if (key) s.labels[by] = key
++      else delete s.labels[by]
++    } else {
++      const cur = Array.isArray(s.labels[by]) ? (s.labels[by] as string[]) : []
++      const old = ax.items.find((i) => cur.includes(i.id))?.id
++      const next = cur.filter((x) => x !== old)
++      if (key && !next.includes(key)) next.push(key)
++      if (next.length) s.labels[by] = next
++      else delete s.labels[by]
++    }
++  }
++}
++
++/** Kennzahlen einer Szene (`null` = nicht zugeordnet, `undefined` = ganzes Projekt). */
++export function sceneStats(p: Project, sceneId: string | null | undefined): SceneStats {
++  const shots = sceneId === undefined ? p.shots : sceneShots(p, sceneId)
++  const st: SceneStats = { count: shots.length, frames: 0, brollFrames: 0, bySize: {}, setups: 0 }
++  const setups = new Set<string>()
++  for (const s of shots) {
++    const len = s.endFrame - s.startFrame
++    st.frames += len
++    const func = s.labels.func
++    if (Array.isArray(func) ? func.includes('broll') : func === 'broll') st.brollFrames += len
++    const size = s.labels.size
++    if (typeof size === 'string' && size) st.bySize[size] = (st.bySize[size] ?? 0) + len
++    if (s.setup) setups.add(s.setup)
++  }
++  st.setups = setups.size
++  return st
++}
+diff --git a/src/renderer/src/lib/shots.ts b/src/renderer/src/lib/shots.ts
+index 5a0930f..cf8c6b7 100644
+--- a/src/renderer/src/lib/shots.ts
++++ b/src/renderer/src/lib/shots.ts
+@@ -61,6 +61,10 @@ export function splitAt(p: Project, frame: number): boolean {
+   if (frame - s.startFrame < MIN_FRAMES || s.endFrame - frame < MIN_FRAMES) return false
+   const n = newShot(frame, s.endFrame, s.labels)
+   n.sceneId = s.sceneId
++  if (s.setup) n.setup = s.setup
++  const scene = s.sceneId ? p.scenes.find((x) => x.id === s.sceneId) : undefined
++  const at = scene?.order ? scene.order.indexOf(s.id) : -1
++  if (scene?.order && at >= 0) scene.order.splice(at + 1, 0, n.id) // neuer Shot landet direkt hinter seinem Ursprung
+   s.endFrame = frame
+   s.palette = null
+   p.shots.splice(i + 1, 0, n)
+diff --git a/src/renderer/src/lib/thumbs.ts b/src/renderer/src/lib/thumbs.ts
+new file mode 100644
+index 0000000..a5e1a62
+--- /dev/null
++++ b/src/renderer/src/lib/thumbs.ts
+@@ -0,0 +1,81 @@
++/**
++ * Vorschaubilder für den Szenen-Outliner. Sie entstehen im unsichtbaren Hilfsvideo (siehe frames.ts),
++ * einzeln nacheinander und nur für Zeilen, die tatsächlich sichtbar sind. Nichts davon wird gespeichert.
++ */
++import { useEffect, useRef, useState } from 'react'
++import { seekTo, withHelper } from './frames'
++import { useProject } from '@/store/project'
++
++const MAX_CACHE = 800
++const cache = new Map<string, string>()
++const inflight = new Map<string, Promise<string | null>>()
++const canvas = document.createElement('canvas')
++
++export const THUMB_W = 128
++
++function request(proxyPath: string, frame: number, fps: number, aspect: number): Promise<string | null> {
++  const key = `${proxyPath}|${frame}`
++  const hit = cache.get(key)
++  if (hit) return Promise.resolve(hit)
++  const running = inflight.get(key)
++  if (running) return running
++  const job = withHelper(window.api.mediaUrl(proxyPath), async (v) => {
++    await seekTo(v, (frame + 0.5) / fps)
++    const w = THUMB_W
++    const h = Math.max(1, Math.round(w / aspect))
++    canvas.width = w
++    canvas.height = h
++    const ctx = canvas.getContext('2d') as CanvasRenderingContext2D
++    ctx.drawImage(v, 0, 0, w, h)
++    return canvas.toDataURL('image/jpeg', 0.7)
++  })
++    .then((url) => {
++      cache.set(key, url)
++      if (cache.size > MAX_CACHE) cache.delete(cache.keys().next().value as string)
++      return url
++    })
++    .catch(() => null)
++    .finally(() => inflight.delete(key))
++  inflight.set(key, job)
++  return job
++}
++
++/** Liefert das Vorschaubild für `frame` (null, solange es noch berechnet wird oder `enabled` false ist). */
++export function useThumb(frame: number, enabled: boolean): string | null {
++  const proxyPath = useProject((s) => s.proxyPath)
++  const fps = useProject((s) => s.project?.video.fps ?? 25)
++  const aspect = useProject((s) => (s.project ? s.project.video.width / s.project.video.height : 16 / 9))
++  const key = proxyPath ? `${proxyPath}|${frame}` : ''
++  const [url, setUrl] = useState<string | null>(() => (key ? cache.get(key) ?? null : null))
++
++  useEffect(() => {
++    if (!proxyPath) return setUrl(null)
++    const hit = cache.get(key)
++    if (hit) return setUrl(hit)
++    setUrl(null)
++    if (!enabled) return
++    let dead = false
++    void request(proxyPath, frame, fps, aspect).then((u) => {
++      if (!dead && u) setUrl(u)
++    })
++    return () => {
++      dead = true
++    }
++  }, [key, enabled, proxyPath, frame, fps, aspect])
++
++  return url
++}
++
++/** true, sobald das Element (mit etwas Vorlauf) im sichtbaren Bereich war. */
++export function useSeen<T extends HTMLElement>(): [React.RefObject<T | null>, boolean] {
++  const ref = useRef<T>(null)
++  const [seen, setSeen] = useState(false)
++  useEffect(() => {
++    const el = ref.current
++    if (!el || seen) return
++    const io = new IntersectionObserver((e) => e.some((x) => x.isIntersecting) && setSeen(true), { rootMargin: '200px' })
++    io.observe(el)
++    return () => io.disconnect()
++  }, [seen])
++  return [ref, seen]
++}
+diff --git a/src/renderer/src/store/ui.ts b/src/renderer/src/store/ui.ts
+index f6fb38e..976cb3c 100644
+--- a/src/renderer/src/store/ui.ts
++++ b/src/renderer/src/store/ui.ts
+@@ -11,6 +11,8 @@ export interface Busy {
+   onCancel?: () => void
+ }
+ 
++export type Mode = 'analyze' | 'scenes'
++
+ export interface Guides {
+   third: boolean
+   phi: boolean
+@@ -32,6 +34,14 @@ interface UiState {
+   guides: Guides
+   showDraw: boolean
+   tab: string
++  /** Arbeitsmodus: Schnitt & Labels oder Szenen-Outliner. */
++  mode: Mode
++  /** Im Outliner markierte Shots (IDs) und zuletzt angeklickter Shot (für Shift-Auswahl). */
++  sel: string[]
++  selAnchor: string | null
++  /** Eingeklappte Szenen und gewählte Gruppierung pro Szene (Schlüssel: Szenen-ID, "_none" = nicht zugeordnet). */
++  collapsed: Record<string, boolean>
++  groupBy: Record<string, string>
+   /** Empfindlichkeit 1..10 für Schnittkandidaten. */
+   sens: number
+   busy: Busy | null
+@@ -61,6 +71,11 @@ export const useUi = create<UiState>(() => ({
+   guides: { third: false, phi: false, center: false, diag: false },
+   showDraw: true,
+   tab: 'labels',
++  mode: 'analyze',
++  sel: [],
++  selAnchor: null,
++  collapsed: {},
++  groupBy: {},
+   sens: 6,
+   busy: null,
+   helpOpen: false,
+diff --git a/src/renderer/src/styles.css b/src/renderer/src/styles.css
+index 3af5504..5ce26eb 100644
+--- a/src/renderer/src/styles.css
++++ b/src/renderer/src/styles.css
+@@ -106,7 +106,7 @@ main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0}
+ .viewerArea{flex:1;min-height:120px;position:relative;display:flex}
+ #toolbox{display:flex;flex-direction:column;gap:2px;padding:4px 3px;width:34px;flex:none;background:var(--window);border-right:1px solid var(--outline)}
+ #toolbox .hsep{height:2px;margin:4px 2px;border-top:1px solid var(--line);border-bottom:1px solid var(--line-hi)}
+-#viewerWrap{flex:1;position:relative;display:flex;align-items:center;justify-content:center;background:#1b1b1b;min-height:0}
++#viewerWrap{flex:1;min-width:0;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;background:#1b1b1b;min-height:0}
+ #frame{position:relative;background:#000;box-shadow:0 0 0 1px #000}
+ #frame video,#frame canvas{position:absolute;inset:0;width:100%;height:100%}
+ #draw{touch-action:none}
+@@ -172,3 +172,77 @@ aside{display:flex;flex-direction:column;background:var(--window);border-left:1p
+ #statusbar span{padding:0 10px;border-right:1px solid var(--line);box-shadow:1px 0 0 var(--line-hi);line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ #statusbar span:first-child{padding-left:4px}
+ #statusbar span:last-child{border-right:0;box-shadow:none}
++
++/* Modus-Umschalter (segmentiert, wie QButtonGroup) */
++.seg{display:inline-flex}
++.seg button{border-radius:0;margin-left:-1px}
++.seg button:first-child{border-radius:2px 0 0 2px;margin-left:0}
++.seg button:last-child{border-radius:0 2px 2px 0}
++
++/* Szenen-Modus: breite rechte Leiste mit Outliner */
++main.scenes{grid-template-columns:minmax(0,1fr) minmax(540px,52%)}
++aside:has(> .outl){padding:0}
++.outl{display:flex;flex-direction:column;min-height:0;height:100%}
++.outl-bar{display:flex;gap:4px;align-items:center;padding:4px 6px;background:var(--panel);border-bottom:1px solid var(--outline);flex:none}
++.outl-list{flex:1;overflow:auto;background:var(--base)}
++.empty{padding:8px 12px}
++
++.folder{border-bottom:1px solid var(--outline);position:relative}
++.folder.scene-before::before,.folder.scene-after::after{content:"";position:absolute;left:0;right:0;height:2px;background:var(--hl-hi);z-index:5}
++.folder.scene-before::before{top:-1px}
++.folder.scene-after::after{bottom:-1px}
++.fhead{display:flex;align-items:center;gap:4px 6px;padding:3px 6px;background:linear-gradient(#444,#393939);border-bottom:1px solid var(--outline);box-shadow:inset 0 1px 0 var(--bevel);min-height:30px;flex-wrap:wrap}
++.fhead.droptarget{background:linear-gradient(var(--hl),var(--hl-lo))}
++.fname{font-size:12px;cursor:default}
++.fname-edit{width:160px}
++.floc{width:130px;background:transparent;border-color:transparent;box-shadow:none;color:var(--muted)}
++.floc:hover,.floc:focus{background:var(--base);border-color:var(--outline);color:var(--text)}
++.fcolor{width:18px;height:18px;padding:0;border:1px solid var(--outline);border-radius:2px;background:none}
++.fcolor.off{display:inline-block;visibility:hidden}
++.grip{display:flex;cursor:grab;color:var(--muted);width:14px;justify-content:center}
++.grip.off{visibility:hidden}
++.fstat{font-size:11px;color:var(--muted);padding:0 6px;border-left:1px solid var(--line);white-space:nowrap}
++.fstat.broll{color:#f5c542}
++.sizebar{display:flex;width:70px;height:10px;border:1px solid var(--outline);border-radius:2px;overflow:hidden;background:var(--base)}
++.sizebar i{display:block;height:100%}
++.fgroup{max-width:170px}
++
++.fbody{padding:2px 0 4px;border-left:3px solid var(--scene,#777)}
++.lane{display:flex;align-items:center;gap:6px;padding:2px 8px;margin-top:2px;font-weight:600;background:var(--window);border-top:1px solid var(--line-hi);border-bottom:1px solid var(--outline)}
++.lane i{width:10px;height:10px;border-radius:2px;border:1px solid var(--outline)}
++.lane.droptarget{background:var(--hl);color:#fff}
++.lane.droptarget .muted{color:#dbe9f7}
++
++.shotrow{display:grid;grid-template-columns:10px 96px 1fr auto;gap:8px;align-items:center;padding:4px 8px 4px 4px;position:relative;border-left:3px solid transparent}
++.shotrow:nth-child(odd){background:#262626}
++.shotrow:nth-child(even){background:#2b2b2b}
++.shotrow:hover{background:#333}
++.shotrow.sel{background:var(--hl);color:#fff}
++.shotrow.sel .muted{color:#dbe9f7}
++.shotrow.cur{border-left-color:#e0483c}
++.shotrow.drop-before::before,.shotrow.drop-after::after{content:"";position:absolute;left:0;right:0;height:2px;background:var(--hl-hi);box-shadow:0 0 0 1px #0006;z-index:4}
++.shotrow.drop-before::before{top:-1px}
++.shotrow.drop-after::after{bottom:-1px}
++.rail{align-self:stretch;display:flex;justify-content:center}
++.rail i{display:block;width:3px;border-radius:1px}
++.thumb{width:96px;background:#111;border:1px solid var(--outline);display:flex;overflow:hidden}
++.thumb img{width:100%;height:100%;object-fit:cover;pointer-events:none}
++.sinfo{min-width:0;display:flex;flex-direction:column;gap:3px}
++.sline{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-variant-numeric:tabular-nums}
++.setup{padding:0 6px;border:1px solid var(--outline);border-radius:2px;background:var(--button);color:var(--text);font-size:11px}
++.schips{display:flex;gap:3px;flex-wrap:wrap}
++.mini{font-size:11px;padding:0 5px;background:var(--button);border:1px solid var(--outline);border-radius:2px;color:var(--text);white-space:nowrap}
++.mini.func{background:#4a4030;border-color:#2a2418}
++.shotrow.sel .mini{background:var(--hl-lo)}
++.dur{height:4px;background:#1b1b1b;border-radius:1px;overflow:hidden}
++.dur i{display:block;height:100%}
++.spal{display:flex;height:34px;width:12px;flex-direction:column;border:1px solid var(--outline)}
++.spal i{flex:1}
++
++.selbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:5px 8px;background:var(--panel);border-top:1px solid var(--outline);flex:none}
++
++.fstats,.fctl{display:flex;align-items:center;gap:6px;margin-left:auto}
++.fstats{margin-left:auto}
++.fctl{margin-left:0}
++.floc{width:110px}
++.fgroup{min-width:150px;max-width:180px}
+diff --git a/src/shared/project.ts b/src/shared/project.ts
+index 6b090c3..754d1c6 100644
+--- a/src/shared/project.ts
++++ b/src/shared/project.ts
+@@ -5,7 +5,9 @@
+  * Rundungsproblem beim Verschieben von Schnitten, und Frame-Snapping ist automatisch erfüllt.
+  * Ein Shot belegt die Frames [startFrame, endFrame) – endFrame ist exklusiv.
+  *
+- * Szenen/Locations sind bereits im Modell vorgesehen (sceneId, scenes), die Oberfläche folgt später.
++ * Szenen/Locations: `scenes` ist die Ordnerliste des Szenen-Outliners, `shot.sceneId` ordnet einen Shot zu.
++ * Die Reihenfolge der Shots innerhalb einer Szene steht in `scene.order` (unabhängig von der Zeit im Video),
++ * `shot.setup` ist die frei benennbare Kameraposition.
+  * Plugins speichern eigene Daten unter shot.ext[pluginId] bzw. project.ext[pluginId].
+  */
+ 
+@@ -62,6 +64,8 @@ export interface Shot {
+   draw: Shape[]
+   palette: Palette | null
+   sceneId: string | null
++  /** Kameraposition / Setup, z. B. "A" oder "Kamera 2 links". Leer = nicht angegeben. */
++  setup?: string
+   ext: Record<string, unknown>
+ }
+ 
+@@ -70,6 +74,8 @@ export interface Scene {
+   name: string
+   location: string
+   color?: string
++  /** Shot-IDs in der vom Nutzer gewählten Reihenfolge. Fehlende Shots werden chronologisch angehängt. */
++  order?: string[]
+ }
+ 
+ export interface SceneCandidate {
+-- 
+2.43.0
+
